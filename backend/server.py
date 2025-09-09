@@ -305,6 +305,7 @@ Etherscan: https://etherscan.io/tx/{transaction.tx_hash}
 async def send_telegram_message(message: str) -> bool:
     """Send message to Telegram"""
     try:
+        # First try with MarkdownV2
         await telegram_bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
             text=message,
@@ -314,8 +315,21 @@ async def send_telegram_message(message: str) -> bool:
         monitor_stats.telegram_messages_sent += 1
         return True
     except Exception as e:
-        logger.error(f"Error sending Telegram message: {e}")
-        return False
+        logger.warning(f"MarkdownV2 failed: {e}")
+        # Fallback to plain text
+        try:
+            # Remove markdown formatting for plain text
+            plain_message = message.replace('*', '').replace('`', '').replace('\\', '')
+            await telegram_bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID,
+                text=plain_message,
+                disable_web_page_preview=False
+            )
+            monitor_stats.telegram_messages_sent += 1
+            return True
+        except Exception as e2:
+            logger.error(f"Error sending Telegram message (both attempts failed): {e2}")
+            return False
 
 async def process_transaction(tx_data: Dict):
     """Process a single transaction"""
