@@ -578,12 +578,16 @@ async def process_transaction(tx_data: Dict):
         # Get token info if we have a token address
         if transaction.token_address:
             token_info = await get_token_info(transaction.token_address)
+            # Get pool address for the token/WETH pair
+            pool_address = await get_pool_address(transaction.token_address)
+            transaction.pool_address = pool_address
         else:
             # If no token address extracted, use placeholder for demo
             token_info = {
                 "symbol": "TOKEN",
                 "name": "Unknown Token",
-                "address": "0x0000000000000000000000000000000000000000"
+                "address": "0x0000000000000000000000000000000000000000",
+                "decimals": 18
             }
         
         transaction.token_address = token_info["address"]
@@ -603,7 +607,7 @@ async def process_transaction(tx_data: Dict):
         
         if success:
             monitor_stats.successful_parses += 1
-            logger.info(f"✅ Processed {transaction.swap_type}: {token_info['symbol']} - {transaction.amount[:6]} ETH")
+            logger.info(f"✅ Processed {transaction.swap_type}: {token_info['symbol']} - {transaction.amount[:6]} ETH - Pool: {transaction.pool_address[:10] if transaction.pool_address else 'N/A'}...")
         else:
             monitor_stats.failed_parses += 1
             logger.warning(f"❌ Failed to send message for {transaction.swap_type}: {token_info['symbol']}")
