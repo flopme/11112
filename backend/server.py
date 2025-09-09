@@ -250,7 +250,7 @@ async def get_token_info(token_address: str) -> Dict:
         }
 
 def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
-    """Parse Uniswap V2 swap transaction with proper token address and amount extraction"""
+    """Parse Uniswap V2 swap transaction with proper ABI decoding"""
     try:
         tx_input = tx_data.get("input", "")
         if not tx_input or len(tx_input) < 10:
@@ -263,84 +263,128 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
             
         method_id = tx_input[:10]
         
-        # Common Uniswap V2 method signatures
-        uniswap_methods = {
-            "0x7ff36ab5": ("swapExactETHForTokens", "buy"),           # ETH -> Token
-            "0x18cbafe5": ("swapExactTokensForETH", "sell"),          # Token -> ETH  
-            "0x38ed1739": ("swapExactTokensForTokens", "swap"),       # Token -> Token
-            "0x8803dbee": ("swapTokensForExactETH", "sell"),          # Token -> ETH (exact out)
-            "0x4a25d94a": ("swapTokensForExactTokens", "swap"),       # Token -> Token (exact out)
-            "0x1f00ca74": ("swapExactETHForTokensSupportingFeeOnTransferTokens", "buy"), # ETH -> Token (fee)
-            "0x791ac947": ("swapExactTokensForETHSupportingFeeOnTransferTokens", "sell"), # Token -> ETH (fee)
-            "0x5c11d795": ("swapExactTokensForTokensSupportingFeeOnTransferTokens", "swap") # Token -> Token (fee)
-        }
-        
-        if method_id not in uniswap_methods:
+        if method_id not in UNISWAP_FUNCTION_SIGS:
             return None
             
-        method_name, swap_type = uniswap_methods[method_id]
+        func_info = UNISWAP_FUNCTION_SIGS[method_id]
+        swap_type = func_info["swap_type"]
         
-        # Get ETH value for buys
+        # Get ETH value for buy transactions
         eth_value_wei = int(tx_data.get("value", "0"), 16)
         eth_value = eth_value_wei / 10**18
         
-        # Extract token address and amount from transaction input data
+        # Decode function parameters
         token_address = None
         amount_str = "0"
         
         try:
-            # Remove method signature (first 4 bytes = 8 hex chars)
-            data = tx_input[10:]
+            # Remove method signature (first 4 bytes)
+            calldata = bytes.fromhex(tx_input[10:])
             
-            if swap_type == "buy":  # ETH -> Token
-                # For ETH->Token swaps, amount is the ETH value
-                amount_str = str(eth_value)
-                # Path is usually the last parameter, extract token address from path[1]
-                if len(data) >= 256:  # Enough data for parameters
-                    # Skip amountOutMin (32 bytes), path offset (32 bytes), to (32 bytes), deadline (32 bytes)
-                    # Then path length (32 bytes), then path[0] (WETH, 32 bytes), then path[1] (token)
-                    path_start = 128 + 64 + 64  # Skip to path array data
-                    if len(data) >= path_start + 64:
-                        token_address = "0x" + data[path_start + 24:path_start + 64]  # Remove padding
-                        
-            elif swap_type == "sell":  # Token -> ETH
-                # For Token->ETH, extract amount from first parameter
-                if len(data) >= 64:
-                    amount_in_wei = int(data[:64], 16)  # First parameter is amountIn
-                    # Convert to ETH equivalent (this is approximation - real value depends on swap rate)
-                    amount_str = str(amount_in_wei / 10**18)  # Assume 18 decimals
+            # Decode parameters based on function signature
+            if swap_type == "buy":  # ETH -> Token swaps
+                # swapExactETHForTokens(uint amountOutMin, address[] path, address to, uint deadline)
+                if len(calldata) >= 128:  # Minimum data length
+                    params = decode(["uint256", "uint256", "uint256", "uint256"], calldata[:128])
+                    amount_out_min = params[0]
+                    path_offset = params[1] 
+                    to_address_param = params[2]
+                    deadline = params[3]
                     
-                # Extract token address from path[0]
-                if len(data) >= 256:
-                    path_start = 64 + 64 + 64 + 64 + 64  # Skip parameters to path data
-                    if len(data) >= path_start + 32:
-                        token_address = "0x" + data[path_start + 24:path_start + 64]  # Remove padding
-                        
-            else:  # Token -> Token swap
-                if len(data) >= 64:
-                    amount_in_wei = int(data[:64], 16)
-                    amount_str = str(amount_in_wei / 10**18)
-                    
-                # Get first token from path
-                if len(data) >= 256:
-                    path_start = 64 + 64 + 64 + 64 + 64
-                    if len(data) >= path_start + 32:
-                        token_address = "0x" + data[path_start + 24:path_start + 64]
-                        
-        except Exception as e:
-            logger.debug(f"Error extracting token data: {e}")
-            # Fallback to basic parsing
-            if swap_type == "buy":
+                    # Decode path array
+                    if len(calldata) > path_offset:
+                        path_data = calldata[path_offset:]
+                        if len(path_data) >= 32:
+                            path_length = int.from_bytes(path_data[:32], 'big')
+                            if path_length >= 2 and len(path_data) >= 32 + (path_length * 32):
+                                # Get token address (path[1] for ETH->Token)
+                                token_bytes = path_data[64:96]  # Second address in path
+                                token_address = "0x" + token_bytes[-20:].hex()
+                                
                 amount_str = str(eth_value)
+                
+            elif swap_type == "sell":  # Token -> ETH swaps
+                # swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline)
+                if len(calldata) >= 160:
+                    params = decode(["uint256", "uint256", "uint256", "uint256", "uint256"], calldata[:160])
+                    amount_in = params[0]
+                    amount_out_min = params[1]
+                    path_offset = params[2]
+                    to_address_param = params[3]
+                    deadline = params[4]
+                    
+                    # Decode path array to get token address (path[0])
+                    if len(calldata) > path_offset:
+                        path_data = calldata[path_offset:]
+                        if len(path_data) >= 64:
+                            path_length = int.from_bytes(path_data[:32], 'big')
+                            if path_length >= 2 and len(path_data) >= 32 + (path_length * 32):
+                                # Get token address (path[0] for Token->ETH)
+                                token_bytes = path_data[32:64]  # First address in path
+                                token_address = "0x" + token_bytes[-20:].hex()
+                    
+                    # Convert amount from wei to display value (assume 18 decimals)
+                    amount_str = str(amount_in / 10**18)
+                    
+            else:  # Token -> Token swaps
+                if len(calldata) >= 160:
+                    params = decode(["uint256", "uint256", "uint256", "uint256", "uint256"], calldata[:160])
+                    amount_in = params[0]
+                    path_offset = params[2]
+                    
+                    # Get first token from path
+                    if len(calldata) > path_offset:
+                        path_data = calldata[path_offset:]
+                        if len(path_data) >= 64:
+                            path_length = int.from_bytes(path_data[:32], 'big')
+                            if path_length >= 2:
+                                token_bytes = path_data[32:64]
+                                token_address = "0x" + token_bytes[-20:].hex()
+                    
+                    amount_str = str(amount_in / 10**18)
+                    
+        except Exception as decode_error:
+            logger.debug(f"ABI decode failed, using fallback parsing: {decode_error}")
             
-        # Validate token address format
-        if token_address and len(token_address) == 42 and token_address.startswith("0x"):
-            # Check if it's not zero address or invalid
-            if token_address == "0x0000000000000000000000000000000000000000":
+            # Fallback to simple hex parsing
+            try:
+                data = tx_input[10:]  # Remove method signature
+                
+                if swap_type == "buy" and eth_value > 0:
+                    amount_str = str(eth_value)
+                    # Simple path extraction for ETH->Token
+                    if len(data) >= 256:
+                        # Look for token address in the data (40 hex chars = 20 bytes)
+                        for i in range(0, len(data) - 40, 2):
+                            addr_candidate = "0x" + data[i:i+40]
+                            if len(addr_candidate) == 42 and addr_candidate.startswith("0x"):
+                                # Check if it looks like a valid token address (not WETH)
+                                if addr_candidate.lower() != "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2":
+                                    token_address = addr_candidate.lower()
+                                    break
+                                    
+                elif swap_type == "sell":
+                    # For sells, try to get amount from first parameter
+                    if len(data) >= 64:
+                        try:
+                            amount_hex = data[:64]
+                            amount_wei = int(amount_hex, 16)
+                            amount_str = str(amount_wei / 10**18)
+                        except:
+                            amount_str = "0"
+                            
+            except Exception as fallback_error:
+                logger.debug(f"Fallback parsing also failed: {fallback_error}")
+                if swap_type == "buy":
+                    amount_str = str(eth_value)
+        
+        # Validate token address
+        if token_address:
+            if len(token_address) != 42 or not token_address.startswith("0x"):
                 token_address = None
-        else:
-            token_address = None
-            
+            elif token_address == "0x0000000000000000000000000000000000000000":
+                token_address = None
+                
         # Create transaction data
         transaction = TransactionData(
             tx_hash=tx_data.get("hash", ""),
@@ -354,7 +398,7 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
         return transaction
         
     except Exception as e:
-        logger.error(f"Error parsing transaction: {e}")
+        logger.error(f"Error parsing transaction {tx_data.get('hash', 'unknown')}: {e}")
         return None
 
 async def format_telegram_message(transaction: TransactionData, token_info: Dict) -> str:
