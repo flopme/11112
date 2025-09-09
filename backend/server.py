@@ -299,18 +299,27 @@ async def process_transaction(tx_data: Dict):
         if not transaction:
             return
             
-        # Get token info (assume first token in path for simplicity)
-        # In real implementation, you'd decode the transaction input to get exact token addresses
-        token_address = "0xA0b86a33E6441E6d9a2e3c8cf8b7f5b6b7f5b0a6"  # Placeholder
-        token_info = await get_token_info(token_address)
+        # Get token info if we have a token address
+        if transaction.token_address:
+            token_info = await get_token_info(transaction.token_address)
+        else:
+            # If no token address extracted, use placeholder for demo
+            token_info = {
+                "symbol": "TOKEN",
+                "name": "Unknown Token",
+                "address": "0x0000000000000000000000000000000000000000"
+            }
         
         transaction.token_address = token_info["address"]
         transaction.token_symbol = token_info["symbol"]
         transaction.token_name = token_info["name"]
-        transaction.dexview_link = f"https://dexview.com/eth/{token_address}"
+        transaction.dexview_link = f"https://dexview.com/eth/{token_info['address']}"
         
         # Save to database
-        await db.transactions.insert_one(transaction.dict())
+        transaction_dict = transaction.dict()
+        # Convert datetime to ISO string for MongoDB
+        transaction_dict['timestamp'] = transaction.timestamp.isoformat()
+        await db.transactions.insert_one(transaction_dict)
         
         # Format and send Telegram message
         message = await format_telegram_message(transaction, token_info)
@@ -318,9 +327,10 @@ async def process_transaction(tx_data: Dict):
         
         if success:
             monitor_stats.successful_parses += 1
-            logger.info(f"Processed swap: {transaction.swap_type} - {token_info['symbol']}")
+            logger.info(f"✅ Processed {transaction.swap_type}: {token_info['symbol']} - {transaction.amount[:6]} ETH")
         else:
             monitor_stats.failed_parses += 1
+            logger.warning(f"❌ Failed to send message for {transaction.swap_type}: {token_info['symbol']}")
             
     except Exception as e:
         logger.error(f"Error processing transaction: {e}")
