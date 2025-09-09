@@ -97,26 +97,70 @@ monitoring_active = False
 async def get_token_info(token_address: str) -> Dict:
     """Get token information from contract"""
     try:
-        # Use a simple API to get token info (you can also use direct Web3 calls)
-        async with httpx.AsyncClient() as client:
-            # Try to get token info from a public API
-            response = await client.get(f"https://api.coingecko.com/api/v3/coins/ethereum/contract/{token_address}")
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "symbol": data.get("symbol", "UNKNOWN").upper(),
-                    "name": data.get("name", "Unknown Token"),
-                    "address": token_address
-                }
+        if not token_address or token_address == "0x" + "0" * 40:
+            return {
+                "symbol": "ETH",
+                "name": "Ethereum",
+                "address": "0x0000000000000000000000000000000000000000"
+            }
+            
+        # Validate address format
+        if len(token_address) != 42 or not token_address.startswith("0x"):
+            logger.warning(f"Invalid token address format: {token_address}")
+            return {
+                "symbol": "UNKNOWN",
+                "name": "Unknown Token", 
+                "address": token_address
+            }
+            
+        # First try CoinGecko API for well-known tokens
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"https://api.coingecko.com/api/v3/coins/ethereum/contract/{token_address.lower()}"
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "symbol": data.get("symbol", "UNKNOWN").upper(),
+                        "name": data.get("name", "Unknown Token"),
+                        "address": token_address.lower()
+                    }
+        except Exception as e:
+            logger.debug(f"CoinGecko API failed for {token_address}: {e}")
+            
+        # Fallback to direct contract calls (simplified - would need Web3 provider)
+        # For now, try some common token patterns
+        common_tokens = {
+            "0xa0b86a33e6441e6d9a2e3c8cf8b7f5b6b7f5b0a6": {"symbol": "USDC", "name": "USD Coin"},
+            "0xdac17f958d2ee523a2206206994597c13d831ec7": {"symbol": "USDT", "name": "Tether USD"},
+            "0x6b175474e89094c44da98b954eedeac495271d0f": {"symbol": "DAI", "name": "Dai Stablecoin"},
+            "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce": {"symbol": "SHIB", "name": "Shiba Inu"},
+        }
+        
+        token_info = common_tokens.get(token_address.lower())
+        if token_info:
+            return {
+                "symbol": token_info["symbol"],
+                "name": token_info["name"],
+                "address": token_address.lower()
+            }
+            
+        # Final fallback - generate a name based on address
+        short_addr = token_address[-8:]
+        return {
+            "symbol": f"TOKEN_{short_addr.upper()}",
+            "name": f"Token {short_addr}",
+            "address": token_address.lower()
+        }
+        
     except Exception as e:
         logger.error(f"Error getting token info for {token_address}: {e}")
-    
-    # Fallback - return basic info
-    return {
-        "symbol": "UNKNOWN",
-        "name": "Unknown Token",
-        "address": token_address
-    }
+        return {
+            "symbol": "ERROR",
+            "name": "Error Getting Token Info",
+            "address": token_address
+        }
 
 def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
     """Parse Uniswap V2 swap transaction"""
