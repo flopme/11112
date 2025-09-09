@@ -95,7 +95,7 @@ monitor_stats = MonitorStats()
 monitoring_active = False
 
 async def get_token_info(token_address: str) -> Dict:
-    """Get token information from contract"""
+    """Get token information from contract and external APIs"""
     try:
         if not token_address or token_address == "0x" + "0" * 40:
             return {
@@ -113,45 +113,105 @@ async def get_token_info(token_address: str) -> Dict:
                 "address": token_address
             }
             
-        # First try CoinGecko API for well-known tokens
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(
-                    f"https://api.coingecko.com/api/v3/coins/ethereum/contract/{token_address.lower()}"
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        "symbol": data.get("symbol", "UNKNOWN").upper(),
-                        "name": data.get("name", "Unknown Token"),
-                        "address": token_address.lower()
-                    }
-        except Exception as e:
-            logger.debug(f"CoinGecko API failed for {token_address}: {e}")
-            
-        # Fallback to direct contract calls (simplified - would need Web3 provider)
-        # For now, try some common token patterns
+        token_address = token_address.lower()
+        
+        # Common tokens database (most traded tokens)
         common_tokens = {
-            "0xa0b86a33e6441e6d9a2e3c8cf8b7f5b6b7f5b0a6": {"symbol": "USDC", "name": "USD Coin"},
             "0xdac17f958d2ee523a2206206994597c13d831ec7": {"symbol": "USDT", "name": "Tether USD"},
+            "0xa0b86a33e6441e6d9a2e3c8cf8b7f5b6b7f5b0a6": {"symbol": "USDC", "name": "USD Coin"},
             "0x6b175474e89094c44da98b954eedeac495271d0f": {"symbol": "DAI", "name": "Dai Stablecoin"},
             "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce": {"symbol": "SHIB", "name": "Shiba Inu"},
+            "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": {"symbol": "WBTC", "name": "Wrapped Bitcoin"},
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": {"symbol": "WETH", "name": "Wrapped Ether"},
+            "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984": {"symbol": "UNI", "name": "Uniswap"},
+            "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0": {"symbol": "MATIC", "name": "Polygon"},
+            "0xa693b19d2931d498c5b318df961919bb4aee87a5": {"symbol": "UST", "name": "TerraUSD"},
+            "0x4e15361fd6b4bb609fa63c81a2be19d873717870": {"symbol": "FTM", "name": "Fantom"},
         }
         
-        token_info = common_tokens.get(token_address.lower())
-        if token_info:
+        # Check common tokens first
+        if token_address in common_tokens:
+            token_info = common_tokens[token_address]
             return {
                 "symbol": token_info["symbol"],
                 "name": token_info["name"],
-                "address": token_address.lower()
+                "address": token_address
             }
+        
+        # Try CoinGecko API for well-known tokens (with rate limiting handling)
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(
+                    f"https://api.coingecko.com/api/v3/coins/ethereum/contract/{token_address}",
+                    headers={"Accept": "application/json"}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    symbol = data.get("symbol", "").upper()
+                    name = data.get("name", "")
+                    if symbol and name:
+                        return {
+                            "symbol": symbol,
+                            "name": name,
+                            "address": token_address
+                        }
+                elif response.status_code == 429:
+                    logger.debug(f"CoinGecko rate limited for {token_address}")
+                else:
+                    logger.debug(f"CoinGecko returned {response.status_code} for {token_address}")
+        except Exception as e:
+            logger.debug(f"CoinGecko API failed for {token_address}: {e}")
+        
+        # Try Etherscan API as backup
+        try:
+            etherscan_api_key = "YourApiKeyToken"  # Free tier available
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(
+                    f"https://api.etherscan.io/api?module=token&action=tokeninfo&contractaddress={token_address}&apikey={etherscan_api_key}"
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("status") == "1" and data.get("result"):
+                        result = data["result"][0] if isinstance(data["result"], list) else data["result"]
+                        symbol = result.get("symbol", "").upper()
+                        name = result.get("name", "")
+                        if symbol and name:
+                            return {
+                                "symbol": symbol,
+                                "name": name,
+                                "address": token_address
+                            }
+        except Exception as e:
+            logger.debug(f"Etherscan API failed for {token_address}: {e}")
             
-        # Final fallback - generate a name based on address
-        short_addr = token_address[-8:]
+        # Try 1inch API for token info
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(
+                    f"https://api.1inch.dev/token/v1.2/1/{token_address}",
+                    headers={"Accept": "application/json"}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    symbol = data.get("symbol", "").upper()
+                    name = data.get("name", "")
+                    if symbol and name:
+                        return {
+                            "symbol": symbol,
+                            "name": name,
+                            "address": token_address
+                        }
+        except Exception as e:
+            logger.debug(f"1inch API failed for {token_address}: {e}")
+            
+        # Generate readable name from contract address
+        short_addr = token_address[-8:].upper()
+        checksum_chars = token_address[2:8].upper()
+        
         return {
-            "symbol": f"TOKEN_{short_addr.upper()}",
+            "symbol": f"T{checksum_chars[:4]}",
             "name": f"Token {short_addr}",
-            "address": token_address.lower()
+            "address": token_address
         }
         
     except Exception as e:
@@ -159,7 +219,7 @@ async def get_token_info(token_address: str) -> Dict:
         return {
             "symbol": "ERROR",
             "name": "Error Getting Token Info",
-            "address": token_address
+            "address": token_address or "unknown"
         }
 
 def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
