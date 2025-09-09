@@ -128,7 +128,8 @@ async def get_token_info(token_address: str) -> Dict:
             return {
                 "symbol": "ETH",
                 "name": "Ethereum",
-                "address": "0x0000000000000000000000000000000000000000"
+                "address": "0x0000000000000000000000000000000000000000",
+                "decimals": 18
             }
             
         # Validate address format
@@ -137,23 +138,27 @@ async def get_token_info(token_address: str) -> Dict:
             return {
                 "symbol": "UNKNOWN",
                 "name": "Unknown Token", 
-                "address": token_address
+                "address": token_address,
+                "decimals": 18
             }
             
         token_address = token_address.lower()
         
-        # Common tokens database (most traded tokens)
+        # Expanded common tokens database
         common_tokens = {
-            "0xdac17f958d2ee523a2206206994597c13d831ec7": {"symbol": "USDT", "name": "Tether USD"},
-            "0xa0b86a33e6441e6d9a2e3c8cf8b7f5b6b7f5b0a6": {"symbol": "USDC", "name": "USD Coin"},
-            "0x6b175474e89094c44da98b954eedeac495271d0f": {"symbol": "DAI", "name": "Dai Stablecoin"},
-            "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce": {"symbol": "SHIB", "name": "Shiba Inu"},
-            "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": {"symbol": "WBTC", "name": "Wrapped Bitcoin"},
-            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": {"symbol": "WETH", "name": "Wrapped Ether"},
-            "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984": {"symbol": "UNI", "name": "Uniswap"},
-            "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0": {"symbol": "MATIC", "name": "Polygon"},
-            "0xa693b19d2931d498c5b318df961919bb4aee87a5": {"symbol": "UST", "name": "TerraUSD"},
-            "0x4e15361fd6b4bb609fa63c81a2be19d873717870": {"symbol": "FTM", "name": "Fantom"},
+            "0xdac17f958d2ee523a2206206994597c13d831ec7": {"symbol": "USDT", "name": "Tether USD", "decimals": 6},
+            "0xa0b86a33e6441e6d9a2e3c8cf8b7f5b6b7f5b0a6": {"symbol": "USDC", "name": "USD Coin", "decimals": 6},
+            "0x6b175474e89094c44da98b954eedeac495271d0f": {"symbol": "DAI", "name": "Dai Stablecoin", "decimals": 18},
+            "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce": {"symbol": "SHIB", "name": "Shiba Inu", "decimals": 18},
+            "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": {"symbol": "WBTC", "name": "Wrapped Bitcoin", "decimals": 8},
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": {"symbol": "WETH", "name": "Wrapped Ether", "decimals": 18},
+            "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984": {"symbol": "UNI", "name": "Uniswap", "decimals": 18},
+            "0x7d1afa7b718fb893db30a3abc0cfc608aacfebb0": {"symbol": "MATIC", "name": "Polygon", "decimals": 18},
+            "0xa693b19d2931d498c5b318df961919bb4aee87a5": {"symbol": "UST", "name": "TerraUSD", "decimals": 18},
+            "0x4e15361fd6b4bb609fa63c81a2be19d873717870": {"symbol": "FTM", "name": "Fantom", "decimals": 18},
+            "0x514910771af9ca656af840dff83e8264ecf986ca": {"symbol": "LINK", "name": "Chainlink", "decimals": 18},
+            "0x0000000000085d4780b73119b644ae5ecd22b376": {"symbol": "TUSD", "name": "TrueUSD", "decimals": 18},
+            "0x8e870d67f660d95d5be530380d0ec0bd388289e1": {"symbol": "ANKR", "name": "Ankr Network", "decimals": 18},
         }
         
         # Check common tokens first
@@ -162,12 +167,38 @@ async def get_token_info(token_address: str) -> Dict:
             return {
                 "symbol": token_info["symbol"],
                 "name": token_info["name"],
-                "address": token_address
+                "address": token_address,
+                "decimals": token_info["decimals"]
             }
         
-        # Try CoinGecko API for well-known tokens (with rate limiting handling)
+        # Try DexScreener API (good for new tokens)
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(
+                    f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    pairs = data.get("pairs", [])
+                    if pairs and len(pairs) > 0:
+                        pair = pairs[0]  # Take first pair
+                        base_token = pair.get("baseToken", {})
+                        if base_token.get("address", "").lower() == token_address:
+                            symbol = base_token.get("symbol", "").upper()
+                            name = base_token.get("name", "")
+                            if symbol and name:
+                                return {
+                                    "symbol": symbol,
+                                    "name": name,
+                                    "address": token_address,
+                                    "decimals": 18  # Most tokens use 18 decimals
+                                }
+        except Exception as e:
+            logger.debug(f"DexScreener API failed for {token_address}: {e}")
+            
+        # Try CoinGecko API
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
                 response = await client.get(
                     f"https://api.coingecko.com/api/v3/coins/ethereum/contract/{token_address}",
                     headers={"Accept": "application/json"}
@@ -176,69 +207,38 @@ async def get_token_info(token_address: str) -> Dict:
                     data = response.json()
                     symbol = data.get("symbol", "").upper()
                     name = data.get("name", "")
-                    if symbol and name:
+                    if symbol and name and len(symbol) <= 10:  # Reasonable symbol length
                         return {
                             "symbol": symbol,
                             "name": name,
-                            "address": token_address
+                            "address": token_address,
+                            "decimals": 18
                         }
                 elif response.status_code == 429:
                     logger.debug(f"CoinGecko rate limited for {token_address}")
-                else:
-                    logger.debug(f"CoinGecko returned {response.status_code} for {token_address}")
         except Exception as e:
             logger.debug(f"CoinGecko API failed for {token_address}: {e}")
-        
-        # Try Etherscan API as backup
-        try:
-            etherscan_api_key = "YourApiKeyToken"  # Free tier available
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                response = await client.get(
-                    f"https://api.etherscan.io/api?module=token&action=tokeninfo&contractaddress={token_address}&apikey={etherscan_api_key}"
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("status") == "1" and data.get("result"):
-                        result = data["result"][0] if isinstance(data["result"], list) else data["result"]
-                        symbol = result.get("symbol", "").upper()
-                        name = result.get("name", "")
-                        if symbol and name:
-                            return {
-                                "symbol": symbol,
-                                "name": name,
-                                "address": token_address
-                            }
-        except Exception as e:
-            logger.debug(f"Etherscan API failed for {token_address}: {e}")
             
-        # Try 1inch API for token info
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                response = await client.get(
-                    f"https://api.1inch.dev/token/v1.2/1/{token_address}",
-                    headers={"Accept": "application/json"}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    symbol = data.get("symbol", "").upper()
-                    name = data.get("name", "")
-                    if symbol and name:
-                        return {
-                            "symbol": symbol,
-                            "name": name,
-                            "address": token_address
-                        }
-        except Exception as e:
-            logger.debug(f"1inch API failed for {token_address}: {e}")
-            
-        # Generate readable name from contract address
-        short_addr = token_address[-8:].upper()
-        checksum_chars = token_address[2:8].upper()
+        # Generate better readable names from contract address
+        # Extract meaningful parts of the address for better readability
+        addr_without_0x = token_address[2:]  # Remove 0x
         
+        # Create symbol from first few characters that aren't 0
+        symbol_chars = ""
+        for char in addr_without_0x:
+            if char != '0':
+                symbol_chars += char.upper()
+                if len(symbol_chars) >= 4:
+                    break
+        
+        if len(symbol_chars) < 4:
+            symbol_chars = addr_without_0x[-6:].upper()  # Use last 6 chars
+            
         return {
-            "symbol": f"T{checksum_chars[:4]}",
-            "name": f"Token {short_addr}",
-            "address": token_address
+            "symbol": symbol_chars[:6],  # Max 6 chars for symbol
+            "name": f"Token {addr_without_0x[-8:].upper()}",
+            "address": token_address,
+            "decimals": 18
         }
         
     except Exception as e:
@@ -246,7 +246,8 @@ async def get_token_info(token_address: str) -> Dict:
         return {
             "symbol": "ERROR",
             "name": "Error Getting Token Info",
-            "address": token_address or "unknown"
+            "address": token_address or "unknown",
+            "decimals": 18
         }
 
 def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
