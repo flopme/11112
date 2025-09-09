@@ -253,16 +253,31 @@ async def format_telegram_message(transaction: TransactionData, token_info: Dict
         # Create DexView link
         dexview_link = f"https://dexview.com/eth/{token_info['address']}"
         
-        # Format message with emojis and markdown
+        # Helper function to escape special characters for MarkdownV2
+        def escape_md(text: str) -> str:
+            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+            for char in special_chars:
+                text = text.replace(char, f'\\{char}')
+            return text
+            
+        # Format message with proper escaping
+        token_name = escape_md(token_info['name'])
+        token_symbol = escape_md(token_info['symbol'])
+        contract_addr = escape_md(token_info['address'])
+        from_addr = escape_md(f"{transaction.from_address[:10]}...{transaction.from_address[-6:]}")
+        tx_hash = escape_md(f"{transaction.tx_hash[:10]}...{transaction.tx_hash[-6:]}")
+        amount = escape_md(transaction.amount[:8])
+        timestamp = escape_md(transaction.timestamp.strftime('%H:%M:%S'))
+        
         message = f"""
 {emoji} *{action} ТОКЕНА*
 
-🏷️ *Токен:* {token_info['name']} \\({token_info['symbol']}\\)
-📄 *Контракт:* `{token_info['address']}`
-💰 *Сумма ETH:* {transaction.amount[:8]} ETH
-👤 *От:* `{transaction.from_address[:10]}...{transaction.from_address[-6:]}`
-🔗 *Транзакция:* `{transaction.tx_hash[:10]}...{transaction.tx_hash[-6:]}`
-⏰ *Время:* {transaction.timestamp.strftime('%H:%M:%S')}
+🏷️ *Токен:* {token_name} \\({token_symbol}\\)
+📄 *Контракт:* `{contract_addr}`
+💰 *Сумма ETH:* {amount} ETH
+👤 *От:* `{from_addr}`
+🔗 *Транзакция:* `{tx_hash}`
+⏰ *Время:* {timestamp}
 
 📊 [Посмотреть на DexView]({dexview_link})
 🔍 [Etherscan](https://etherscan.io/tx/{transaction.tx_hash})
@@ -272,7 +287,20 @@ async def format_telegram_message(transaction: TransactionData, token_info: Dict
         
     except Exception as e:
         logger.error(f"Error formatting message: {e}")
-        return f"❌ Ошибка форматирования сообщения для транзакции {transaction.tx_hash}"
+        # Fallback to simple message without markdown
+        return f"""
+{emoji} {action} ТОКЕНА
+
+Токен: {token_info['name']} ({token_info['symbol']})
+Контракт: {token_info['address']}
+Сумма ETH: {transaction.amount[:8]} ETH
+От: {transaction.from_address[:10]}...{transaction.from_address[-6:]}
+Транзакция: {transaction.tx_hash[:10]}...{transaction.tx_hash[-6:]}
+Время: {transaction.timestamp.strftime('%H:%M:%S')}
+
+DexView: https://dexview.com/eth/{token_info['address']}
+Etherscan: https://etherscan.io/tx/{transaction.tx_hash}
+        """.strip()
 
 async def send_telegram_message(message: str) -> bool:
     """Send message to Telegram"""
