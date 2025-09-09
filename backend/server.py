@@ -357,28 +357,41 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
             elif swap_type == "sell":  # Token -> ETH swaps
                 # swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline)
                 if len(calldata) >= 160:
-                    params = decode(["uint256", "uint256", "uint256", "uint256", "uint256"], calldata[:160])
-                    amount_in = params[0]
-                    amount_out_min = params[1]
-                    path_offset = params[2]
-                    to_address_param = params[3]
-                    deadline = params[4]
-                    
-                    # Decode path array to get token address (path[0])
-                    if len(calldata) > path_offset:
-                        path_data = calldata[path_offset:]
-                        if len(path_data) >= 64:
-                            path_length = int.from_bytes(path_data[:32], 'big')
-                            if path_length >= 2 and len(path_data) >= 32 + (path_length * 32):
-                                # Get token address (path[0] for Token->ETH)
-                                token_bytes = path_data[32:64]  # First address in path
-                                token_address = "0x" + token_bytes[-20:].hex()
-                    
-                    # For sells, show token amount and expected ETH amount
-                    # Store both amounts for better display
-                    token_amount_str = str(amount_in / 10**18)  # Assume 18 decimals for now
-                    eth_amount_str = str(amount_out_min / 10**18)  # Minimum ETH expected
-                    amount_str = eth_amount_str  # Primary display amount
+                    try:
+                        params = decode(["uint256", "uint256", "uint256", "uint256", "uint256"], calldata[:160])
+                        amount_in = params[0]
+                        amount_out_min = params[1]
+                        path_offset = params[2]
+                        to_address_param = params[3]
+                        deadline = params[4]
+                        
+                        # Decode path array to get token address (path[0])
+                        if len(calldata) > path_offset and path_offset < len(calldata):
+                            path_data = calldata[path_offset:]
+                            if len(path_data) >= 64:
+                                path_length = int.from_bytes(path_data[:32], 'big')
+                                if path_length >= 2 and len(path_data) >= 32 + (path_length * 32):
+                                    # Get token address (path[0] for Token->ETH)
+                                    token_bytes = path_data[32:64]  # First address in path
+                                    token_address = "0x" + token_bytes[-20:].hex()
+                        
+                        # For sells, show token amount and expected ETH amount
+                        # Store both amounts for better display
+                        token_amount_str = str(amount_in / 10**18)  # Assume 18 decimals for now
+                        eth_amount_str = str(amount_out_min / 10**18)  # Minimum ETH expected
+                        
+                        # Use the higher of the two values as primary display (sometimes amount_out_min is very small)
+                        if amount_out_min > 0:
+                            amount_str = eth_amount_str  # Primary display amount
+                        else:
+                            # Fallback: estimate ETH value from token amount (very rough estimate)
+                            estimated_eth = min(amount_in / 10**18 * 0.00001, 10)  # Cap at 10 ETH
+                            amount_str = str(estimated_eth)
+                            
+                    except Exception as decode_error:
+                        logger.debug(f"Sell ABI decode failed: {decode_error}")
+                        # Fallback for sells
+                        amount_str = "0"
                     
             else:  # Token -> Token swaps
                 if len(calldata) >= 160:
