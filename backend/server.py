@@ -141,14 +141,17 @@ async def get_pool_address(token_address: str) -> Optional[str]:
         token0 = token_address.lower() if token_address.lower() < WETH.lower() else WETH.lower()
         token1 = WETH.lower() if token_address.lower() < WETH.lower() else token_address.lower()
         
-        # Create salt for CREATE2
-        import hashlib
+        # Create salt for CREATE2 using proper keccak256
+        from Crypto.Hash import keccak
         
-        # Encode token addresses for hashing
-        token0_bytes = bytes.fromhex(token0[2:].zfill(64))  # Pad to 32 bytes
-        token1_bytes = bytes.fromhex(token1[2:].zfill(64))  # Pad to 32 bytes
+        # Encode token addresses for hashing (remove 0x and pad to 20 bytes each)
+        token0_bytes = bytes.fromhex(token0[2:])  # 20 bytes
+        token1_bytes = bytes.fromhex(token1[2:])  # 20 bytes
         
-        salt = hashlib.keccak256(token0_bytes + token1_bytes).digest()
+        # Salt is keccak256(token0 + token1)
+        salt_hasher = keccak.new(digest_bits=256)
+        salt_hasher.update(token0_bytes + token1_bytes)
+        salt = salt_hasher.digest()
         
         # Uniswap V2 init code hash
         init_code_hash = bytes.fromhex("96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f")
@@ -157,7 +160,10 @@ async def get_pool_address(token_address: str) -> Optional[str]:
         factory_bytes = bytes.fromhex(FACTORY[2:])
         create2_input = b'\xff' + factory_bytes + salt + init_code_hash
         
-        pool_address = "0x" + hashlib.keccak256(create2_input).digest()[-20:].hex()
+        address_hasher = keccak.new(digest_bits=256)
+        address_hasher.update(create2_input)
+        
+        pool_address = "0x" + address_hasher.digest()[-20:].hex()
         
         return pool_address
         
