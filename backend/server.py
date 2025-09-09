@@ -501,6 +501,7 @@ async def format_telegram_message(transaction: TransactionData, token_info: Dict
 
 🏷️ *Токен:* {token_name} \\({token_symbol}\\)
 📄 *Контракт:* `{contract_addr}`
+🏊 *Пул:* `{escape_md(transaction.pool_address) if transaction.pool_address else "N/A"}`
 {amount_line}
 👤 *От:* `{from_addr}`
 🔗 *Транзакция:* `{tx_hash}`
