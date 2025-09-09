@@ -437,15 +437,28 @@ async def format_telegram_message(transaction: TransactionData, token_info: Dict
         contract_addr = escape_md(token_info['address'])
         from_addr = escape_md(f"{transaction.from_address[:10]}...{transaction.from_address[-6:]}")
         tx_hash = escape_md(f"{transaction.tx_hash[:10]}...{transaction.tx_hash[-6:]}")
-        amount = escape_md(transaction.amount[:8])
         timestamp = escape_md(transaction.timestamp.strftime('%H:%M:%S'))
+        
+        # Format amount based on transaction type
+        if transaction.swap_type == "buy":
+            amount_line = f"💰 *Сумма:* {escape_md(transaction.amount[:8])} ETH"
+        elif transaction.swap_type == "sell":
+            # For sells, show both token amount and expected ETH
+            if transaction.token_amount and float(transaction.token_amount) > 0:
+                token_amt = escape_md(f"{float(transaction.token_amount):.4f}")
+                eth_amt = escape_md(transaction.amount[:8])
+                amount_line = f"💰 *Продано:* {token_amt} {token_symbol}\n💵 *Мин\\. ETH:* {eth_amt} ETH"
+            else:
+                amount_line = f"💰 *Сумма:* {escape_md(transaction.amount[:8])} ETH"
+        else:  # swap
+            amount_line = f"💰 *Сумма:* {escape_md(transaction.amount[:8])} токенов"
         
         message = f"""
 {emoji} *{action} ТОКЕНА*
 
 🏷️ *Токен:* {token_name} \\({token_symbol}\\)
 📄 *Контракт:* `{contract_addr}`
-💰 *Сумма ETH:* {amount} ETH
+{amount_line}
 👤 *От:* `{from_addr}`
 🔗 *Транзакция:* `{tx_hash}`
 ⏰ *Время:* {timestamp}
@@ -459,12 +472,19 @@ async def format_telegram_message(transaction: TransactionData, token_info: Dict
     except Exception as e:
         logger.error(f"Error formatting message: {e}")
         # Fallback to simple message without markdown
+        action_text = "ПОКУПКА" if transaction.swap_type == "buy" else "ПРОДАЖА" if transaction.swap_type == "sell" else "ОБМЕН"
+        emoji_char = "🟢" if transaction.swap_type == "buy" else "🔴" if transaction.swap_type == "sell" else "🔄"
+        
+        amount_text = f"{transaction.amount[:8]} ETH"
+        if transaction.swap_type == "sell" and transaction.token_amount:
+            amount_text = f"{float(transaction.token_amount):.4f} {token_info['symbol']} -> {transaction.amount[:8]} ETH"
+            
         return f"""
-{emoji} {action} ТОКЕНА
+{emoji_char} {action_text} ТОКЕНА
 
 Токен: {token_info['name']} ({token_info['symbol']})
 Контракт: {token_info['address']}
-Сумма ETH: {transaction.amount[:8]} ETH
+Сумма: {amount_text}
 От: {transaction.from_address[:10]}...{transaction.from_address[-6:]}
 Транзакция: {transaction.tx_hash[:10]}...{transaction.tx_hash[-6:]}
 Время: {transaction.timestamp.strftime('%H:%M:%S')}
