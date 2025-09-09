@@ -35,17 +35,44 @@ db = client[os.environ['DB_NAME']]
 # Initialize Telegram Bot
 telegram_bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# Web3 instance for transaction decoding
+from web3 import Web3
+from web3.types import TxParams
+from eth_abi import decode
+
+# Web3 instance for transaction decoding  
 w3 = Web3()
 
-# Uniswap V2 Router address and swap signature
+# Uniswap V2 Router address and ABI signatures
 UNISWAP_V2_ROUTER = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
-SWAP_EXACT_ETH_FOR_TOKENS = "0x7ff36ab5"
-SWAP_EXACT_TOKENS_FOR_ETH = "0x18cbafe5"
-SWAP_EXACT_TOKENS_FOR_TOKENS = "0x38ed1739"
 
-# ERC20 Transfer signature
-TRANSFER_SIGNATURE = "0xa9059cbb"
+# ABI function signatures for decoding
+UNISWAP_FUNCTION_SIGS = {
+    "0x7ff36ab5": {
+        "name": "swapExactETHForTokens",
+        "inputs": ["uint256", "address[]", "address", "uint256"],
+        "swap_type": "buy"
+    },
+    "0x18cbafe5": {
+        "name": "swapExactTokensForETH", 
+        "inputs": ["uint256", "uint256", "address[]", "address", "uint256"],
+        "swap_type": "sell"
+    },
+    "0x38ed1739": {
+        "name": "swapExactTokensForTokens",
+        "inputs": ["uint256", "uint256", "address[]", "address", "uint256"], 
+        "swap_type": "swap"
+    },
+    "0x1f00ca74": {
+        "name": "swapExactETHForTokensSupportingFeeOnTransferTokens",
+        "inputs": ["uint256", "address[]", "address", "uint256"],
+        "swap_type": "buy"
+    },
+    "0x791ac947": {
+        "name": "swapExactTokensForETHSupportingFeeOnTransferTokens", 
+        "inputs": ["uint256", "uint256", "address[]", "address", "uint256"],
+        "swap_type": "sell"
+    }
+}
 
 # Create FastAPI app
 app = FastAPI(title="Ethereum Mempool Monitor")
