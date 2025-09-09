@@ -132,24 +132,58 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
             
         method_id = tx_input[:10]
         
-        # Determine swap type based on method signature
-        swap_type = None
-        if method_id == SWAP_EXACT_ETH_FOR_TOKENS:
-            swap_type = "buy"  # ETH -> Token
-        elif method_id == SWAP_EXACT_TOKENS_FOR_ETH:
-            swap_type = "sell"  # Token -> ETH
-        elif method_id == SWAP_EXACT_TOKENS_FOR_TOKENS:
-            swap_type = "swap"  # Token -> Token
-        else:
+        # Common Uniswap V2 method signatures
+        uniswap_methods = {
+            "0x7ff36ab5": "swapExactETHForTokens",           # ETH -> Token
+            "0x18cbafe5": "swapExactTokensForETH",           # Token -> ETH  
+            "0x38ed1739": "swapExactTokensForTokens",        # Token -> Token
+            "0x8803dbee": "swapTokensForExactETH",           # Token -> ETH (exact out)
+            "0x4a25d94a": "swapTokensForExactTokens",        # Token -> Token (exact out)
+            "0x1f00ca74": "swapExactETHForTokensSupportingFeeOnTransferTokens", # ETH -> Token (fee)
+            "0x791ac947": "swapExactTokensForETHSupportingFeeOnTransferTokens", # Token -> ETH (fee)
+            "0x5c11d795": "swapExactTokensForTokensSupportingFeeOnTransferTokens" # Token -> Token (fee)
+        }
+        
+        if method_id not in uniswap_methods:
             return None
+            
+        method_name = uniswap_methods[method_id]
+        
+        # Determine swap type based on method
+        if "ETHForTokens" in method_name:
+            swap_type = "buy"  # ETH -> Token
+        elif "TokensForETH" in method_name:
+            swap_type = "sell"  # Token -> ETH
+        else:
+            swap_type = "swap"  # Token -> Token
+            
+        # Get ETH value
+        eth_value = int(tx_data.get("value", "0"), 16) / 10**18
+        
+        # Try to extract token address from transaction input
+        token_address = None
+        try:
+            # For simplicity, we'll decode the path parameter from common swap methods
+            # This is a simplified approach - full implementation would need proper ABI decoding
+            if len(tx_input) > 138:  # Enough data for path parameter
+                # Extract path array (simplified)
+                if swap_type == "buy":
+                    # ETH -> Token: path[1] is token address
+                    token_address = "0x" + tx_input[138:178]  # 20 bytes = 40 hex chars
+                elif swap_type == "sell":
+                    # Token -> ETH: path[0] is token address  
+                    token_address = "0x" + tx_input[74:114]   # First address in path
+        except:
+            pass
             
         # Create transaction data
         transaction = TransactionData(
             tx_hash=tx_data.get("hash", ""),
             from_address=tx_data.get("from", ""),
             to_address=to_address,
+            token_address=token_address,
             swap_type=swap_type,
-            amount=str(int(tx_data.get("value", "0"), 16) / 10**18) if tx_data.get("value") else "0"
+            amount=str(eth_value)
         )
         
         return transaction
