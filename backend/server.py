@@ -429,8 +429,30 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
                             
             except Exception as fallback_error:
                 logger.debug(f"Fallback parsing also failed: {fallback_error}")
+                # Final fallback - for buys use ETH value, for sells try to extract from transaction data
                 if swap_type == "buy":
-                    amount_str = str(eth_value)
+                    amount_str = str(eth_value) if eth_value > 0 else "0"
+                elif swap_type == "sell":
+                    # For sells, try to extract amount from first 64 chars (first parameter)
+                    try:
+                        if len(data) >= 64:
+                            amount_hex = data[:64]
+                            amount_wei = int(amount_hex, 16)
+                            # If the amount seems too large (more than 1B tokens), it's probably in wei
+                            if amount_wei > 1000000000 * 10**18:  # 1B tokens with 18 decimals
+                                # Try to parse as token amount and estimate ETH value
+                                token_amount = amount_wei / 10**18
+                                # Very rough estimate: assume 1 token = 0.000001 ETH for display
+                                amount_str = str(min(token_amount * 0.000001, 100))  # Cap at 100 ETH for safety
+                            else:
+                                # Smaller number, likely already in correct decimals
+                                amount_str = str(amount_wei / 10**18)
+                        else:
+                            amount_str = "0"
+                    except:
+                        amount_str = "0"
+                else:  # swap
+                    amount_str = str(eth_value) if eth_value > 0 else "0"
         
         # Validate token address
         if token_address:
