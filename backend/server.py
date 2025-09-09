@@ -397,7 +397,8 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
             to_address=to_address,
             token_address=token_address,
             swap_type=swap_type,
-            amount=amount_str
+            amount=amount_str,
+            token_amount=locals().get('token_amount_str') if swap_type == "sell" else None
         )
         
         return transaction
