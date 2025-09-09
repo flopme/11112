@@ -122,6 +122,49 @@ class MonitorStats(BaseModel):
 monitor_stats = MonitorStats()
 monitoring_active = False
 
+async def get_pool_address(token_address: str) -> Optional[str]:
+    """Get Uniswap V2 pool address for token/WETH pair"""
+    try:
+        if not token_address:
+            return None
+            
+        # WETH address
+        WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+        
+        # Uniswap V2 Factory address
+        FACTORY = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+        
+        # Calculate pair address using CREATE2 formula
+        # This is deterministic calculation for Uniswap V2 pairs
+        
+        # Sort tokens (Uniswap pairs always have tokens in sorted order)
+        token0 = token_address.lower() if token_address.lower() < WETH.lower() else WETH.lower()
+        token1 = WETH.lower() if token_address.lower() < WETH.lower() else token_address.lower()
+        
+        # Create salt for CREATE2
+        import hashlib
+        
+        # Encode token addresses for hashing
+        token0_bytes = bytes.fromhex(token0[2:].zfill(64))  # Pad to 32 bytes
+        token1_bytes = bytes.fromhex(token1[2:].zfill(64))  # Pad to 32 bytes
+        
+        salt = hashlib.keccak256(token0_bytes + token1_bytes).digest()
+        
+        # Uniswap V2 init code hash
+        init_code_hash = bytes.fromhex("96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f")
+        
+        # CREATE2 address calculation: keccak256(0xff + factory + salt + initCodeHash)[12:]
+        factory_bytes = bytes.fromhex(FACTORY[2:])
+        create2_input = b'\xff' + factory_bytes + salt + init_code_hash
+        
+        pool_address = "0x" + hashlib.keccak256(create2_input).digest()[-20:].hex()
+        
+        return pool_address
+        
+    except Exception as e:
+        logger.debug(f"Error calculating pool address for {token_address}: {e}")
+        return None
+
 async def get_token_info(token_address: str) -> Dict:
     """Get token information from contract and external APIs"""
     try:
