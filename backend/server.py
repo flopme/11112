@@ -325,8 +325,11 @@ def parse_swap_transaction(tx_data: Dict) -> Optional[TransactionData]:
                                 token_bytes = path_data[32:64]  # First address in path
                                 token_address = "0x" + token_bytes[-20:].hex()
                     
-                    # Convert amount from wei to display value (assume 18 decimals)
-                    amount_str = str(amount_in / 10**18)
+                    # For sells, show token amount and expected ETH amount
+                    # Store both amounts for better display
+                    token_amount_str = str(amount_in / 10**18)  # Assume 18 decimals for now
+                    eth_amount_str = str(amount_out_min / 10**18)  # Minimum ETH expected
+                    amount_str = eth_amount_str  # Primary display amount
                     
             else:  # Token -> Token swaps
                 if len(calldata) >= 160:
