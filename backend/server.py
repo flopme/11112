@@ -528,6 +528,7 @@ async def format_telegram_message(transaction: TransactionData, token_info: Dict
 
 Токен: {token_info['name']} ({token_info['symbol']})
 Контракт: {token_info['address']}
+Пул: {transaction.pool_address if transaction.pool_address else 'N/A'}
 Сумма: {amount_text}
 От: {transaction.from_address[:10]}...{transaction.from_address[-6:]}
 Транзакция: {transaction.tx_hash[:10]}...{transaction.tx_hash[-6:]}
