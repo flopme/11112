@@ -103,6 +103,7 @@ class TransactionData(BaseModel):
     token_symbol: Optional[str] = None
     token_name: Optional[str] = None
     amount: Optional[str] = None
+    token_amount: Optional[str] = None  # Amount in tokens for sells
     swap_type: str  # "buy" or "sell"
     pool_address: Optional[str] = None
     dexview_link: Optional[str] = None
